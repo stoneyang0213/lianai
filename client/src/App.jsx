@@ -7,6 +7,34 @@ function App() {
     const [analysisLogs, setAnalysisLogs] = useState([]);
     const [result, setResult] = useState(null);
 
+    // Helper to compress image
+    const compressImage = async (file) => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 800; // Resize to reasonable width for API
+                    const scaleSize = MAX_WIDTH / img.width;
+                    const width = (img.width > MAX_WIDTH) ? MAX_WIDTH : img.width;
+                    const height = (img.width > MAX_WIDTH) ? img.height * scaleSize : img.height;
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    // Quality 0.7 JPEG
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                    resolve(dataUrl);
+                };
+            };
+        });
+    };
+
     const handleAnalyze = async () => {
         if (files.length < 1) {
             alert("请至少上传 1 张截图以获得准确分析。");
@@ -16,23 +44,16 @@ function App() {
         setAnalysisLogs(["正在加密图片...", "准备上传..."]);
 
         try {
-            // 1. Convert images to Base64
-            const promises = files.map(file => {
-                return new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.readAsDataURL(file);
-                    reader.onload = () => resolve(reader.result);
-                    reader.onerror = error => reject(error);
-                });
-            });
+            // 1. Convert images to Base64 (Compressed)
+            setAnalysisLogs(prev => [...prev, "图像压缩处理中..."]);
 
-            setAnalysisLogs(prev => [...prev, "图像转换中..."]);
+            const promises = files.map(file => compressImage(file));
             const imagesBase64 = await Promise.all(promises);
 
             // 2. Call Backend
             setAnalysisLogs(prev => [...prev, "连接云端大脑...", "AI 正在深度思考 (需30-60秒)..."]);
 
-            const response = await fetch('http://localhost:3000/api/analyze', {
+            const response = await fetch('/api/analyze', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -41,7 +62,8 @@ function App() {
             });
 
             if (!response.ok) {
-                throw new Error('Analysis failed');
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Analysis failed');
             }
 
             setAnalysisLogs(prev => [...prev, "思考完成，正在生成报告..."]);
