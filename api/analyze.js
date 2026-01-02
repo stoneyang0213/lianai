@@ -1,10 +1,27 @@
-import axios from 'axios';
+export default async function handler(req, res) {
+    // CORS configuration
+    res.setHeader('Access-Control-Allow-Credentials', true);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+    res.setHeader(
+        'Access-Control-Allow-Headers',
+        'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+    );
 
-const API_KEY = "28be2b46-b78f-494a-b98c-8d5e95ad8bd5";
-const ENDPOINT = "https://ark.cn-beijing.volces.com/api/v3/chat/completions";
-const MODEL = "doubao-seed-1-6-thinking-250715";
+    if (req.method === 'OPTIONS') {
+        res.status(200).end();
+        return;
+    }
 
-const SYSTEM_PROMPT = `你是一个追求异性的高手，对于青春男女生的心理和外在表现，有非常强的洞察，也有一套很厉害的追求异性的技巧！擅长于输出简短但有效的分析和建议。
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method Not Allowed' });
+    }
+
+    const API_KEY = "28be2b46-b78f-494a-b98c-8d5e95ad8bd5";
+    const ENDPOINT = "https://ark.cn-beijing.volces.com/api/v3/chat/completions";
+    const MODEL = "doubao-seed-1-6-thinking-250715";
+
+    const SYSTEM_PROMPT = `你是一个追求异性的高手，对于青春男女生的心理和外在表现，有非常强的洞察，也有一套很厉害的追求异性的技巧！擅长于输出简短但有效的分析和建议。
 
 请根据用户提供的朋友圈截图，输出一份 JSON 格式的分析报告。
 不要输出任何 markdown 格式，只输出纯 JSON 字符串。
@@ -20,19 +37,6 @@ JSON 结构如下：
   ]
 }`;
 
-export const config = {
-    api: {
-        bodyParser: {
-            sizeLimit: '4mb',
-        },
-    },
-};
-
-export default async function handler(req, res) {
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
-    }
-
     try {
         const { images } = req.body;
 
@@ -40,16 +44,17 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: "No images provided" });
         }
 
-        console.log(`Received request with ${images.length} images.`);
-
         // Construct content array
         const content = [
             { type: "text", text: "这是目标对象的几张朋友圈截图。请根据截图内容（文案、场景、时间、穿搭等）进行深度分析。" }
         ];
 
         // Add images
-        images.forEach(imgBase64 => {
-            const url = imgBase64.startsWith('data:') ? imgBase64 : `data:image/jpeg;base64,${imgBase64}`;
+        images.forEach((imgBase64) => {
+            let url = imgBase64;
+            if (!imgBase64.startsWith('data:')) {
+                url = `data:image/jpeg;base64,${imgBase64}`;
+            }
             content.push({
                 type: "image_url",
                 image_url: {
@@ -58,33 +63,29 @@ export default async function handler(req, res) {
             });
         });
 
-        // Call Volcengine API
-        const response = await axios.post(
-            ENDPOINT,
-            {
+        const response = await fetch(ENDPOINT, {
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
                 model: MODEL,
                 messages: [
-                    {
-                        role: "system",
-                        content: SYSTEM_PROMPT
-                    },
-                    {
-                        role: "user",
-                        content: content
-                    }
+                    { role: "system", content: SYSTEM_PROMPT },
+                    { role: "user", content: content }
                 ],
                 temperature: 0.7
-            },
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${API_KEY}`
-                },
-                timeout: 60000 // 60s timeout (Vercel generic usage limit is often 10s or 60s depending on plan)
-            }
-        );
+            })
+        });
 
-        const resultText = response.data.choices[0].message.content;
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Volcengine Error: ${response.status} - ${errorText}`);
+        }
+
+        const resultJson = await response.json();
+        const resultText = resultJson.choices[0].message.content;
 
         // Attempt to parse JSON
         let resultData;
@@ -92,7 +93,6 @@ export default async function handler(req, res) {
             const cleanJson = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
             resultData = JSON.parse(cleanJson);
         } catch (e) {
-            console.error("JSON Parse Error:", e);
             resultData = {
                 score: 0,
                 insight: resultText,
@@ -104,7 +104,7 @@ export default async function handler(req, res) {
         res.status(200).json(resultData);
 
     } catch (error) {
-        console.error("Analysis Failed:", error.message);
+        console.error("Vercel Function Error:", error);
         res.status(500).json({ error: "Analysis failed", details: error.message });
     }
 }

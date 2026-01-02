@@ -40,7 +40,9 @@ app.post('/api/analyze', async (req, res) => {
             return res.status(400).json({ error: "No images provided" });
         }
 
-        console.log(`Received request with ${images.length} images.`);
+        // Calculate approximate payload size
+        const payloadSize = JSON.stringify(req.body).length;
+        console.log(`[Request] Received ${images.length} images. Payload size: ${(payloadSize / 1024 / 1024).toFixed(2)} MB`);
 
         // Construct content array
         const content = [
@@ -48,9 +50,17 @@ app.post('/api/analyze', async (req, res) => {
         ];
 
         // Add images
-        images.forEach(imgBase64 => {
-            // Ensure header exists just in case, though client should send full data url
-            const url = imgBase64.startsWith('data:') ? imgBase64 : `data:image/jpeg;base64,${imgBase64}`;
+        images.forEach((imgBase64, index) => {
+            // Ensure header exists
+            // Note: Frontend should send full data URL, but we ensure robustness
+            let url = imgBase64;
+            if (!imgBase64.startsWith('data:')) {
+                // Default to jpeg if no prefix found, though frontend sends jpeg
+                url = `data:image/jpeg;base64,${imgBase64}`;
+            }
+
+            console.log(`[Image ${index + 1}] Data URL prefix: ${url.substring(0, 30)}... Length: ${url.length}`);
+
             content.push({
                 type: "image_url",
                 image_url: {
@@ -59,6 +69,7 @@ app.post('/api/analyze', async (req, res) => {
             });
         });
 
+        console.log("[API] Calling Volcengine...");
         // Call Volcengine API
         const response = await axios.post(
             ENDPOINT,

@@ -63,7 +63,7 @@ function App() {
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || 'Analysis failed');
+                throw new Error(errorData.details || errorData.error || 'Analysis failed');
             }
 
             setAnalysisLogs(prev => [...prev, "思考完成，正在生成报告..."]);
